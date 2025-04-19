@@ -1,186 +1,162 @@
-CREATE OR REPLACE FUNCTION redistribute_students_evenly()
+-- Функция для равномерного распределения студентов по общежитиям
+CREATE OR REPLACE FUNCTION raspredelit_studentov()
 RETURNS TEXT AS $$
 DECLARE
-    total_students INT;
-    total_dormitories INT;
-    students_per_dormitory INT;
-    remainder INT;
-    dormitory_rec RECORD;
-    student_counter INT := 0;
+    vsego_studentov INT;
+    vsego_obshejitiy INT; 
+    na_odno_obshejitie INT; 
+    ostalos_lishnih INT; 
+    obshejitie RECORD;    
+    schetchik INT := 0;   
 BEGIN
-    -- Получаем общее количество студентов и общежитий
-    SELECT COUNT(*) INTO total_students FROM students;
-    SELECT COUNT(*) INTO total_dormitories FROM dormitory;
+
+    SELECT COUNT(*) INTO vsego_studentov FROM students;
+    SELECT COUNT(*) INTO vsego_obshejitiy FROM dormitory;
     
-    -- Рассчитываем базовое количество студентов на общежитие и остаток
-    students_per_dormitory := total_students / total_dormitories;
-    remainder := total_students % total_dormitories;
+    na_odno_obshejitie := vsego_studentov / vsego_obshejitiy;
+    ostalos_lishnih := vsego_studentov % vsego_obshejitiy;
     
-    -- Создаем временную таблицу для хранения порядка распределения
-    CREATE TEMP TABLE temp_dorm_order AS
+    CREATE TEMP TABLE raspredelenie AS
     SELECT number_of_dormitory, 
-           students_per_dormitory + 
-           CASE WHEN ROW_NUMBER() OVER () <= remainder THEN 1 ELSE 0 END AS target_count
+           na_odno_obshejitie + 
+           CASE WHEN ROW_NUMBER() OVER () <= ostalos_lishnih THEN 1 ELSE 0 END AS nado_studentov
     FROM dormitory
     ORDER BY number_of_dormitory;
     
-    -- Распределяем всех студентов за один проход
-    FOR dormitory_rec IN SELECT * FROM temp_dorm_order ORDER BY number_of_dormitory
+    FOR obshejitie IN SELECT * FROM raspredelenie ORDER BY number_of_dormitory
     LOOP
-        -- Обновляем общежитие для группы студентов
         UPDATE students
-        SET number_of_dormitory = dormitory_rec.number_of_dormitory
+        SET number_of_dormitory = obshejitie.number_of_dormitory
         WHERE id IN (
             SELECT id 
             FROM students
-            WHERE number_of_dormitory != dormitory_rec.number_of_dormitory OR number_of_dormitory IS NULL
+            WHERE number_of_dormitory != obshejitie.number_of_dormitory OR number_of_dormitory IS NULL
             ORDER BY id
-            LIMIT dormitory_rec.target_count
-            OFFSET student_counter
+            LIMIT obshejitie.nado_studentov
+            OFFSET schetchik
         );
         
-        student_counter := student_counter + dormitory_rec.target_count;
+        schetchik := schetchik + obshejitie.nado_studentov;
     END LOOP;
     
-    -- Удаляем временную таблицу
-    DROP TABLE temp_dorm_order;
+    DROP TABLE raspredelenie;
     
-    -- Возвращаем отчет о выполнении
-    RETURN 'Все студенты успешно перераспределены. ' || 
-           'Среднее количество студентов на общежитие: ' || students_per_dormitory || 
-           CASE WHEN remainder > 0 THEN ' (+' || remainder || ' общежития получили по 1 дополнительному студенту)' ELSE '' END;
+    RETURN 'Студенты распределены. В среднем: ' || na_odno_obshejitie || 
+           CASE WHEN ostalos_lishnih > 0 THEN ' (+' || ostalos_lishnih || ' общежитий получили по 1 дополнительному студенту)' ELSE '' END;
 END;
 $$ LANGUAGE plpgsql;
 
 
--- Выполнить перераспределение
-SELECT redistribute_students_evenly();
+SELECT raspredelit_studentov();
 
--- Проверить результат
+
 SELECT 
-    d.number_of_dormitory,
-    d.address,
-    COUNT(s.id) AS students_count
+    d.number_of_dormitory AS "Номер общежития",
+    d.address AS "Адрес",
+    COUNT(s.id) AS "Количество студентов"
 FROM dormitory d
 LEFT JOIN students s ON d.number_of_dormitory = s.number_of_dormitory
 GROUP BY d.number_of_dormitory, d.address
 ORDER BY d.number_of_dormitory;
 
-CREATE OR REPLACE FUNCTION assign_liners_to_students()
+-- Функция для выдачи комплектов белья студентам
+CREATE OR REPLACE FUNCTION vydat_bele()
 RETURNS TEXT AS $$
 DECLARE
-    unassigned_students INT;
-    unassigned_liners INT;
-    assigned_count INT := 0;
-    dormitory_rec RECORD;
+    bez_bele INT;      
+    svobodnogo_bele INT; 
+    vydano INT := 0;   
+    obshejitie RECORD;
 BEGIN
-    -- Проверяем количество студентов без комплектов и свободных комплектов
-    SELECT COUNT(*) INTO unassigned_students 
-    FROM students 
-    WHERE liner_serial_number IS NULL;
+
+    SELECT COUNT(*) INTO bez_bele FROM students WHERE liner_serial_number IS NULL;
+    SELECT COUNT(*) INTO svobodnogo_bele FROM set_of_liner WHERE student_id IS NULL;
     
-    SELECT COUNT(*) INTO unassigned_liners 
-    FROM set_of_liner 
-    WHERE student_id IS NULL;
+
+    IF bez_bele = 0 THEN RETURN 'Все студенты уже получили белье'; END IF;
+    IF svobodnogo_bele = 0 THEN RETURN 'Нет свободных комплектов белья'; END IF;
     
-    -- Если нет студентов без комплектов
-    IF unassigned_students = 0 THEN
-        RETURN 'Все студенты уже имеют комплекты белья';
-    END IF;
-    
-    -- Если нет свободных комплектов
-    IF unassigned_liners = 0 THEN
-        RETURN 'Нет свободных комплектов белья для назначения';
-    END IF;
-    
-    -- Распределяем комплекты по общежитиям
-    FOR dormitory_rec IN 
-        SELECT DISTINCT number_of_dormitory FROM dormitory ORDER BY number_of_dormitory
+
+    FOR obshejitie IN SELECT DISTINCT number_of_dormitory FROM dormitory ORDER BY number_of_dormitory
     LOOP
-        -- Назначаем комплекты студентам в текущем общежитии
-        WITH dorm_students AS (
-            SELECT id 
-            FROM students 
-            WHERE number_of_dormitory = dormitory_rec.number_of_dormitory 
-            AND liner_serial_number IS NULL
+
+        WITH studenti_bez_bele AS (
+            SELECT id FROM students 
+            WHERE number_of_dormitory = obshejitie.number_of_dormitory AND liner_serial_number IS NULL
             ORDER BY id
             FOR UPDATE
         ),
-        dorm_liners AS (
-            SELECT serial_number 
-            FROM set_of_liner 
-            WHERE number_of_dormitory = dormitory_rec.number_of_dormitory 
-            AND student_id IS NULL
+        svobodnoe_bele AS (
+            SELECT serial_number FROM set_of_liner 
+            WHERE number_of_dormitory = obshejitie.number_of_dormitory AND student_id IS NULL
             ORDER BY serial_number
             FOR UPDATE
         ),
-        assignments AS (
+        raspredelenie AS (
             SELECT 
-                ds.id AS student_id,
-                (SELECT serial_number FROM dorm_liners ORDER BY serial_number LIMIT 1 OFFSET rn) AS liner_serial
+                s.id AS student_id,
+                (SELECT serial_number FROM svobodnoe_bele ORDER BY serial_number LIMIT 1 OFFSET rn) AS nomer_bele
             FROM (
-                SELECT id, ROW_NUMBER() OVER () - 1 AS rn 
-                FROM dorm_students
-            ) ds
+                SELECT id, ROW_NUMBER() OVER () - 1 AS rn FROM studenti_bez_bele
+            ) s
         )
-        UPDATE students s
-        SET liner_serial_number = a.liner_serial
-        FROM assignments a
-        WHERE s.id = a.student_id
-        AND a.liner_serial IS NOT NULL;
+
+        UPDATE students st
+        SET liner_serial_number = r.nomer_bele
+        FROM raspredelenie r
+        WHERE st.id = r.student_id AND r.nomer_bele IS NOT NULL;
         
-        -- Обновляем счетчик назначенных комплектов
-        GET DIAGNOSTICS assigned_count = ROW_COUNT;
+
+        GET DIAGNOSTICS vydano = ROW_COUNT;
     END LOOP;
     
-    -- Обновляем обратную связь в таблице комплектов
+
     UPDATE set_of_liner sl
     SET student_id = s.id
     FROM students s
-    WHERE s.liner_serial_number = sl.serial_number
-    AND sl.student_id IS NULL;
+    WHERE s.liner_serial_number = sl.serial_number AND sl.student_id IS NULL;
     
-    RETURN 'Успешно назначено ' || assigned_count || ' комплектов белья';
+    RETURN 'Выдано ' || vydano || ' комплектов белья';
 END;
 $$ LANGUAGE plpgsql;
 
--- Выполнить распределение
-SELECT assign_liners_to_students();
 
--- Проверить результат
+SELECT vydat_bele();
+
+-- Проверяем результат
 SELECT 
-    d.number_of_dormitory,
-    COUNT(s.id) AS students_count,
-    COUNT(s.liner_serial_number) AS students_with_liners,
-    COUNT(CASE WHEN sl.student_id IS NULL THEN 1 END) AS free_liners
+    d.number_of_dormitory AS "Номер общежития",
+    COUNT(s.id) AS "Всего студентов",
+    COUNT(s.liner_serial_number) AS "С бельем",
+    COUNT(CASE WHEN sl.student_id IS NULL THEN 1 END) AS "Свободных комплектов"
 FROM dormitory d
 LEFT JOIN students s ON d.number_of_dormitory = s.number_of_dormitory
 LEFT JOIN set_of_liner sl ON d.number_of_dormitory = sl.number_of_dormitory
 GROUP BY d.number_of_dormitory
 ORDER BY d.number_of_dormitory;
 
-
+-- Статистика по общежитиям
 SELECT 
-    d.number_of_dormitory,
-    d.address,  -- Исправлено: было 'adress' вместо 'address'
-    d.number_of_floor,
-    stats.students_count,
-    stats.avg_age,
-    stats.underwear_status
+    d.number_of_dormitory AS "number",
+    d.address AS "addres",
+    d.number_of_floor AS "number_of_floor",
+    stats.students AS "students",
+    ROUND(stats.avg_age) AS "AGE",
+    stats.liner_stats AS "liner_stats"
 FROM dormitory d
 JOIN LATERAL (
     SELECT 
-        COUNT(s.id) AS students_count,
-        AVG(EXTRACT(YEAR FROM AGE(CURRENT_DATE, s.date_of_birth))) AS avg_age,  -- Исправлена функция AGE
+        COUNT(s.id) AS students,
+        AVG(EXTRACT(YEAR FROM AGE(CURRENT_DATE, s.date_of_birth))) AS avg_age,
         jsonb_build_object(
-            'new', COUNT(CASE WHEN sl.state = 'new' THEN 1 END),  -- Исправлено: 'su' на 'sl' (set_of_liner)
-            'good', COUNT(CASE WHEN sl.state = 'good' THEN 1 END),
-            'used', COUNT(CASE WHEN sl.state = 'used' THEN 1 END),
-            'bad', COUNT(CASE WHEN sl.state = 'bad' THEN 1 END)  -- Добавлено для полноты
-        ) AS underwear_status
+            'новое', COUNT(CASE WHEN sl.state = 'new' THEN 1 END),
+            'хорошее', COUNT(CASE WHEN sl.state = 'good' THEN 1 END),
+            'использованное', COUNT(CASE WHEN sl.state = 'used' THEN 1 END),
+            'плохое', COUNT(CASE WHEN sl.state = 'bad' THEN 1 END)
+        ) AS liner_stats
     FROM students s
-    LEFT JOIN set_of_liner sl ON s.id = sl.student_id  -- Исправлено: 'set_of_underwear' на 'set_of_liner'
+    LEFT JOIN set_of_liner sl ON s.id = sl.student_id
     WHERE s.number_of_dormitory = d.number_of_dormitory
-    GROUP BY s.number_of_dormitory  -- Добавлена группировка
+    GROUP BY s.number_of_dormitory
 ) stats ON true
-ORDER BY stats.students_count DESC;
+ORDER BY stats.students DESC;

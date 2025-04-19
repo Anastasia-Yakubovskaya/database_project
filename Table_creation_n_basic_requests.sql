@@ -1,17 +1,13 @@
 
--- 1. Создаем таблицы в правильном порядке с учетом зависимостей
-
--- Таблица университетских зданий (не зависит ни от чего)
+-- 1. Создаем таблицы 
 CREATE TABLE IF NOT EXISTS university_building (
     number_of_building BIGINT NOT NULL PRIMARY KEY,
     faculty VARCHAR(64) NOT NULL,
     address VARCHAR(64) NOT NULL,
     number_of_floor BIGINT NOT NULL,
-    building_condition VARCHAR(64) NOT NULL DEFAULT 'Good'
-        CHECK (building_condition IN ('Excellent', 'Good', 'Satisfactory', 'Poor'))
+    building_condition VARCHAR(64) NOT NULL 
 );
 
--- Таблица персонала (не зависит ни от чего)
 CREATE TABLE IF NOT EXISTS staff (
     id_staff BIGINT NOT NULL PRIMARY KEY,
     name VARCHAR(64) NOT NULL,
@@ -20,7 +16,6 @@ CREATE TABLE IF NOT EXISTS staff (
     address_of_work VARCHAR(64) NOT NULL
 );
 
--- Таблица общежитий (зависит от staff)
 CREATE TABLE IF NOT EXISTS dormitory (
     number_of_dormitory BIGINT NOT NULL PRIMARY KEY,
     address VARCHAR(64) NOT NULL,
@@ -28,7 +23,7 @@ CREATE TABLE IF NOT EXISTS dormitory (
     id_of_staff BIGINT NOT NULL REFERENCES staff(id_staff) ON UPDATE CASCADE
 );
 
--- Таблица студентов (зависит от university_building и dormitory)
+
 CREATE TABLE IF NOT EXISTS students (
     id BIGINT NOT NULL PRIMARY KEY,
     name VARCHAR(64) NOT NULL,
@@ -37,7 +32,7 @@ CREATE TABLE IF NOT EXISTS students (
     number_of_dormitory BIGINT NOT NULL REFERENCES dormitory(number_of_dormitory) ON UPDATE CASCADE
 );
 
--- Таблица комплектов белья (зависит от students и dormitory)
+
 CREATE TABLE IF NOT EXISTS set_of_liner (
     serial_number BIGINT NOT NULL PRIMARY KEY,
     state VARCHAR(64) NOT NULL DEFAULT 'new'
@@ -46,11 +41,10 @@ CREATE TABLE IF NOT EXISTS set_of_liner (
     number_of_dormitory BIGINT NOT NULL REFERENCES dormitory(number_of_dormitory) ON UPDATE CASCADE
 );
 
--- Добавляем обратную ссылку от студентов к комплектам белья
 ALTER TABLE students ADD COLUMN liner_serial_number BIGINT UNIQUE 
 REFERENCES set_of_liner(serial_number) DEFERRABLE INITIALLY DEFERRED;
 
--- Промежуточная таблица для студентов и зданий университета
+
 CREATE TABLE IF NOT EXISTS students_university_building (
     id BIGINT NOT NULL PRIMARY KEY,
     students_id BIGINT NOT NULL REFERENCES students(id) ON DELETE CASCADE,
@@ -58,7 +52,7 @@ CREATE TABLE IF NOT EXISTS students_university_building (
     UNIQUE (students_id, number_of_building)
 );
 
--- Промежуточная таблица для связи персонала и общежитий
+
 CREATE TABLE IF NOT EXISTS staff_dormitory (
     id BIGINT NOT NULL PRIMARY KEY,
     staff_id BIGINT NOT NULL REFERENCES staff(id_staff) ON DELETE CASCADE,
@@ -91,7 +85,7 @@ VALUES
 (19, 'Foreign Languages', 'Lingvisticheskaya st., 6', 4, 'Good'),
 (20, 'Arts', 'Tvorcheskaya st., 10', 3, 'Excellent');
 
--- Then staff
+
 INSERT INTO staff (id_staff, name, date_of_birth, sex, address_of_work)
 VALUES
 (1, 'Ivanova Maria Petrovna', '1980-05-15', 'Female', 'Tsentralnaya st., 1'),
@@ -115,7 +109,7 @@ VALUES
 (19, 'Sokolova Veronika Denisovna', '1989-12-21', 'Female', 'Ugolnaya st., 19'),
 (20, 'Pavlov Artur Romanovich', '1969-04-29', 'Male', 'Atomnaya st., 20');
 
--- Then dormitory
+
 INSERT INTO dormitory (number_of_dormitory, address, number_of_floor, id_of_staff)
 VALUES
 (1, 'Studencheskaya st., 1', 5, 1),
@@ -139,7 +133,7 @@ VALUES
 (19, 'Deanskaya st., 19', 5, 19),
 (20, 'Prorektorskaya st., 20', 6, 20);
 
--- First insert linen sets with NULL student_id (temporarily)
+
 INSERT INTO set_of_liner (serial_number, state, number_of_dormitory, student_id)
 VALUES
 (1, 'new', 1, NULL),
@@ -163,7 +157,7 @@ VALUES
 (19, 'new', 19, NULL),
 (20, 'good', 20, NULL);
 
--- Then students with references to linen sets
+
 INSERT INTO students (id, name, number_of_building, date_of_birth, number_of_dormitory, liner_serial_number)
 VALUES
 (1, 'Aleksandrov Aleksey Ivanovich', 1, '2000-01-15', 1, 1),
@@ -187,7 +181,7 @@ VALUES
 (19, 'Ulyanova Yuliya Dmitrievna', 19, '2004-07-25', 19, 19),
 (20, 'Fedorov Ivan Petrovich', 20, '2007-08-10', 20, 20);
 
--- Now update the linen sets with student IDs
+
 UPDATE set_of_liner SET student_id = 1 WHERE serial_number = 1;
 UPDATE set_of_liner SET student_id = 2 WHERE serial_number = 2;
 UPDATE set_of_liner SET student_id = 3 WHERE serial_number = 3;
@@ -209,7 +203,7 @@ UPDATE set_of_liner SET student_id = 18 WHERE serial_number = 18;
 UPDATE set_of_liner SET student_id = 19 WHERE serial_number = 19;
 UPDATE set_of_liner SET student_id = 20 WHERE serial_number = 20;
 
--- Then students_university_building
+
 INSERT INTO students_university_building (id, students_id, number_of_building)
 VALUES
 (1, 1, 1),
@@ -233,7 +227,7 @@ VALUES
 (19, 19, 19),
 (20, 20, 20);
 
--- Then staff_dormitory
+
 INSERT INTO staff_dormitory (id, staff_id, dormitory_number)
 VALUES
 (1, 1, 1),
